@@ -106,6 +106,12 @@
     font-weight: 700;
     padding: 11px 32px;
   }
+  #reset.armed {
+    background: #d93025;
+    border-color: #d93025;
+    color: #fff;
+    font-weight: 700;
+  }
   .note { font-size: 12px; color: var(--muted); text-align: center; }
   .note.round { color: var(--accent); font-weight: 600; }
   .history {
@@ -347,6 +353,7 @@
   /** 盤面と履歴表示をいまの状態に合わせる */
   function refresh() {
     if (pendingRefresh) { clearTimeout(pendingRefresh); pendingRefresh = null; }
+    disarmReset();
     rebuild();
     draw();
     renderSidebar();
@@ -414,12 +421,33 @@
     resultEl.textContent = "";
   });
 
+  // Notionの埋め込みiframeは sandbox に allow-modals が無く confirm() が
+  // 握り潰されるため、ダイアログを使わず「2回クリックで確定」方式にする
+  let resetArmed = false;
+  let resetTimer = null;
+
+  function disarmReset() {
+    resetArmed = false;
+    if (resetTimer) { clearTimeout(resetTimer); resetTimer = null; }
+    resetBtn.textContent = "履歴をリセット";
+    resetBtn.classList.remove("armed");
+  }
+
   resetBtn.addEventListener("click", () => {
     if (spinning || history.length === 0) return;
-    if (!confirm("司会の履歴をすべて消して、全員を抽選対象に戻します。よろしいですか？")) return;
+
+    if (!resetArmed) {
+      resetArmed = true;
+      resetBtn.textContent = "本当に消す？（もう一度）";
+      resetBtn.classList.add("armed");
+      resetTimer = setTimeout(disarmReset, 5000);   // 放置したら自動で元に戻す
+      return;
+    }
+
+    disarmReset();
     history = [];
     saveHistory();
-    roundMsg = "";
+    roundMsg = "履歴をリセットしました。全員が抽選対象に戻ります。";
     refresh();
     resultEl.textContent = "";
   });
