@@ -138,6 +138,32 @@
   }
   .chip.newest { background: var(--accent); color: #fff; font-weight: 600; }
   .chip.empty { background: transparent; padding-left: 0; }
+  .sync {
+    width: 100%;
+    max-width: 420px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .sync h2 {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 0 0 7px;
+  }
+  .sync textarea {
+    width: 100%;
+    font: inherit;
+    font-size: 12px;
+    resize: vertical;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--chip);
+    color: var(--fg);
+    padding: 6px 8px;
+  }
+  .sync .row { display: flex; gap: 8px; align-items: center; margin-top: 7px; }
+  .sync .hint { font-size: 11px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -156,6 +182,15 @@
 </div>
 
 <div class="note" id="note"></div>
+
+<div class="sync" id="sync" hidden>
+  <h2>Notionの「履歴」欄に貼り付けてください</h2>
+  <textarea id="syncText" readonly rows="2"></textarea>
+  <div class="row">
+    <button id="copy">コピー</button>
+    <span class="hint" id="copyHint">既存の内容と置き換えてください</span>
+  </div>
+</div>
 
 <div class="history">
   <h2>司会の履歴（左が最新）</h2>
@@ -180,17 +215,25 @@
   const spinBtn  = document.getElementById("spin");
   const undoBtn  = document.getElementById("undo");
   const resetBtn = document.getElementById("reset");
+  const syncEl   = document.getElementById("sync");
+  const syncText = document.getElementById("syncText");
+  const copyBtn  = document.getElementById("copy");
+  const copyHint = document.getElementById("copyHint");
 
   const DPR = canvas.width / parseFloat(canvas.style.width);
   const CX = canvas.width / 2, CY = canvas.height / 2;
   const R  = CX - 10 * DPR;
 
-  // ---- URLパラメータ（Notion連携モード）--------------------------------
-  //   ?winner=Bさん        Notionが決めた当選者。必ずこの人で止まる
-  //   ?history=Bさん,Aさん 除外する履歴（カンマ区切り、左が最新）
-  //   ?members=A,B,C      メンバーの上書き（省略時はファイル冒頭の MEMBERS）
-  // winner がある＝Notionが抽選済み。HTMLは演出に徹し、履歴も保存しない。
-  // パラメータなしで開けば、これまで通りHTML単独で抽選します。
+  // ---- URLパラメータ（Notion連携）--------------------------------------
+  //   ?members=A,B,C      メンバー（省略時はファイル冒頭の MEMBERS）
+  //   ?history=B,A        これまでの司会（カンマ区切り、左が最新）
+  //   ?winner=B           Notionが当選者まで決めている場合だけ使う
+  //
+  // モードは3つ。
+  //   連携モード  : winner あり。HTMLは演出だけ。履歴は保存しない
+  //   共有モード  : history あり / winner なし。Notionの履歴を引き継いで
+  //                 HTMLが抽選し、結果を「Notionに貼る文字列」として出す
+  //   単独モード  : パラメータなし。ブラウザのlocalStorageで完結
   const params  = new URLSearchParams(location.search);
   const toList  = s => (s || "").split(",").map(v => v.trim()).filter(Boolean);
   const qWinner = (params.get("winner") || "").trim();
@@ -199,6 +242,9 @@
   const LINKED  = qWinner !== "";
   // Notionの履歴は当選者を先頭に含むので、盤面を作る前に当選者を取り除く
   const qHistory = toList(params.get("history")).filter(n => n !== qWinner);
+  // Notionの履歴を種にしてHTMLが抽選するモード
+  const SEEDED  = !LINKED && params.has("history");
+  let syncDirty = false;
 
   // file:// や プライベートモードで localStorage が使えない場合のフォールバック
   const store = (() => {
@@ -218,7 +264,7 @@
   })();
 
   // history[0] が最新
-  let history = LINKED ? qHistory.slice() : loadHistory();
+  let history = (LINKED || SEEDED) ? qHistory.slice() : loadHistory();
   let candidates = [];
   let rotation = 0;
   let spinning = false;
@@ -236,7 +282,8 @@
   }
 
   function saveHistory() {
-    if (LINKED) return;   // 正はNotion側。ブラウザには残さない
+    // 正はNotion側。ブラウザには残さない（ブラウザごとに食い違うのを防ぐ）
+    if (LINKED || SEEDED) return;
     store.setItem(STORE_KEY, JSON.stringify(history));
   }
 
@@ -260,6 +307,7 @@
       if (!pool.includes(qWinner)) pool = pool.concat([qWinner]);
     } else if (pool.length === 0) {
       history = [];
+      syncDirty = true;
       saveHistory();
       pool = roster.slice();
       roundMsg = "全員が一巡しました。履歴をリセットして新しい一巡を開始します。";
@@ -334,6 +382,16 @@
     undoBtn.disabled = spinning || history.length === 0;
     resetBtn.disabled = spinning || history.length === 0;
 
+    // 共有モード：履歴を変えたら「Notionに貼る文字列」を出す
+    if (SEEDED && syncDirty) {
+      const next = history.join(",");
+      if (syncText.value !== next) {
+        syncText.value = next;
+        copyHint.textContent = "既存の内容と置き換えてください";
+      }
+      syncEl.hidden = false;
+    }
+
     const skipCount = excluded().length;
     if (roundMsg) {
       noteEl.className = "note round";
@@ -394,6 +452,7 @@
       if (t < 1) { requestAnimationFrame(frame); return; }
 
       history.unshift(winner);
+      syncDirty = true;
       saveHistory();
 
       resultEl.innerHTML = `<div class="label">次回の司会は</div>${winner}&nbsp;さん`;
@@ -415,6 +474,7 @@
   undoBtn.addEventListener("click", () => {
     if (spinning || history.length === 0) return;
     const removed = history.shift();
+    syncDirty = true;
     saveHistory();
     roundMsg = `「${removed}」を履歴から取り消しました。`;
     refresh();
@@ -446,10 +506,26 @@
 
     disarmReset();
     history = [];
+    syncDirty = true;
     saveHistory();
     roundMsg = "履歴をリセットしました。全員が抽選対象に戻ります。";
     refresh();
     resultEl.textContent = "";
+  });
+
+  // Notionの埋め込みiframeでは navigator.clipboard が使えないことがあるので、
+  // 失敗したら選択状態にして「⌘Cで」と案内する
+  copyBtn.addEventListener("click", async () => {
+    const text = syncText.value;
+    try {
+      await navigator.clipboard.writeText(text);
+      copyHint.textContent = "コピーしました。Notionの「履歴」に貼り付けてください";
+      return;
+    } catch {
+      syncText.focus();
+      syncText.select();
+      copyHint.textContent = "選択しました。⌘C（Ctrl+C）でコピーしてください";
+    }
   });
 
   refresh();
