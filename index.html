@@ -532,20 +532,37 @@
     resultEl.textContent = "";
   });
 
-  // Notionの埋め込みiframeでは navigator.clipboard が使えないことがあるので、
-  // 失敗したら選択状態にして「⌘Cで」と案内する
+  // Notionの埋め込みiframeは clipboard-write の許可を持たないため
+  // navigator.clipboard が失敗する。古い execCommand は通ることが多いので
+  // そちらに落とし、それも駄目なら選択状態にして ⌘C を案内する
+  function selectSyncText() {
+    syncText.focus();
+    syncText.setSelectionRange(0, syncText.value.length);
+  }
+
   copyBtn.addEventListener("click", async () => {
     const text = syncText.value;
+    if (!text) return;
+
     try {
       await navigator.clipboard.writeText(text);
       copyHint.textContent = "コピーしました。Notionの「履歴」に貼り付けてください";
       return;
-    } catch {
-      syncText.focus();
-      syncText.select();
-      copyHint.textContent = "選択しました。⌘C（Ctrl+C）でコピーしてください";
-    }
+    } catch { /* 下のフォールバックへ */ }
+
+    selectSyncText();
+    try {
+      if (document.execCommand("copy")) {
+        copyHint.textContent = "コピーしました。Notionの「履歴」に貼り付けてください";
+        return;
+      }
+    } catch { /* 下の案内へ */ }
+
+    copyHint.textContent = "選択しました。⌘C（Ctrl+C）を押してください";
   });
+
+  // 枠内をクリックしたら全選択（手でコピーするとき用）
+  syncText.addEventListener("focus", selectSyncText);
 
   // Notionの埋め込みiframeでは埋め込みURLを動的にできないため、いまの履歴は
   // 画面上の欄から読み込む（別タブで ?history= 付きで開いた場合は初期値が入る）
