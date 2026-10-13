@@ -183,8 +183,17 @@
 
 <div class="note" id="note"></div>
 
+<div class="sync" id="load" hidden>
+  <h2>① Notionの「履歴」をコピーして、ここに貼り付けてください</h2>
+  <textarea id="loadText" rows="2" placeholder="履歴が空ならそのまま「反映」でOK"></textarea>
+  <div class="row">
+    <button id="apply">反映</button>
+    <span class="hint" id="loadHint">まわす前に1回だけ行ってください</span>
+  </div>
+</div>
+
 <div class="sync" id="sync" hidden>
-  <h2>Notionの「履歴」欄に貼り付けてください</h2>
+  <h2>② この文字列をNotionの「履歴」に貼り付けてください</h2>
   <textarea id="syncText" readonly rows="2"></textarea>
   <div class="row">
     <button id="copy">コピー</button>
@@ -219,6 +228,9 @@
   const syncText = document.getElementById("syncText");
   const copyBtn  = document.getElementById("copy");
   const copyHint = document.getElementById("copyHint");
+  const loadEl   = document.getElementById("load");
+  const loadText = document.getElementById("loadText");
+  const applyBtn = document.getElementById("apply");
 
   const DPR = canvas.width / parseFloat(canvas.style.width);
   const CX = canvas.width / 2, CY = canvas.height / 2;
@@ -231,8 +243,10 @@
   //
   // モードは3つ。
   //   連携モード  : winner あり。HTMLは演出だけ。履歴は保存しない
-  //   共有モード  : history あり / winner なし。Notionの履歴を引き継いで
-  //                 HTMLが抽選し、結果を「Notionに貼る文字列」として出す
+  //   共有モード  : members あり / winner なし。履歴の正はNotion側。
+  //                 ?history= があればそれを初期値にし、無ければ画面上の
+  //                 貼り付け欄から読み込む（埋め込みはURLを動的にできない）。
+  //                 回したあとは「Notionに貼る文字列」を出す
   //   単独モード  : パラメータなし。ブラウザのlocalStorageで完結
   const params  = new URLSearchParams(location.search);
   const toList  = s => (s || "").split(",").map(v => v.trim()).filter(Boolean);
@@ -242,8 +256,8 @@
   const LINKED  = qWinner !== "";
   // Notionの履歴は当選者を先頭に含むので、盤面を作る前に当選者を取り除く
   const qHistory = toList(params.get("history")).filter(n => n !== qWinner);
-  // Notionの履歴を種にしてHTMLが抽選するモード
-  const SEEDED  = !LINKED && params.has("history");
+  // Notionの履歴を使ってHTMLが抽選するモード
+  const SHARED  = !LINKED && qMembers.length > 0;
   let syncDirty = false;
 
   // file:// や プライベートモードで localStorage が使えない場合のフォールバック
@@ -264,7 +278,7 @@
   })();
 
   // history[0] が最新
-  let history = (LINKED || SEEDED) ? qHistory.slice() : loadHistory();
+  let history = (LINKED || SHARED) ? qHistory.slice() : loadHistory();
   let candidates = [];
   let rotation = 0;
   let spinning = false;
@@ -283,7 +297,7 @@
 
   function saveHistory() {
     // 正はNotion側。ブラウザには残さない（ブラウザごとに食い違うのを防ぐ）
-    if (LINKED || SEEDED) return;
+    if (LINKED || SHARED) return;
     store.setItem(STORE_KEY, JSON.stringify(history));
   }
 
@@ -383,7 +397,7 @@
     resetBtn.disabled = spinning || history.length === 0;
 
     // 共有モード：履歴を変えたら「Notionに貼る文字列」を出す
-    if (SEEDED && syncDirty) {
+    if (SHARED && syncDirty) {
       const next = history.join(",");
       if (syncText.value !== next) {
         syncText.value = next;
@@ -400,6 +414,10 @@
       noteEl.className = "note";
       noteEl.textContent =
         `Notionの履歴で動作中 ／ 対象 ${candidates.length} 名 ／ 除外 ${skipCount} 名`;
+    } else if (SHARED) {
+      noteEl.className = "note";
+      noteEl.textContent =
+        `対象 ${candidates.length} 名 ／ 除外 ${skipCount} 名（履歴の正はNotion）`;
     } else {
       noteEl.className = "note";
       noteEl.textContent = skipCount
@@ -423,6 +441,7 @@
     // ここで必ず組み直す（直前の当選者を盤面から外してから回す）
     roundMsg = "";
     refresh();
+    loadEl.hidden = true;   // 回し始めたら読み込み欄は引っ込める
 
     spinning = true;
     spinBtn.disabled = undoBtn.disabled = resetBtn.disabled = true;
@@ -527,6 +546,25 @@
       copyHint.textContent = "選択しました。⌘C（Ctrl+C）でコピーしてください";
     }
   });
+
+  // Notionの埋め込みiframeでは埋め込みURLを動的にできないため、いまの履歴は
+  // 画面上の欄から読み込む（別タブで ?history= 付きで開いた場合は初期値が入る）
+  applyBtn.addEventListener("click", () => {
+    if (spinning) return;
+    history = toList(loadText.value);
+    syncDirty = false;
+    syncEl.hidden = true;
+    roundMsg = history.length
+      ? `履歴 ${history.length} 名を読み込みました。`
+      : "履歴なしで開始します。全員が対象です。";
+    refresh();
+    resultEl.textContent = "";
+  });
+
+  if (SHARED) {
+    loadText.value = history.join(",");
+    loadEl.hidden = false;
+  }
 
   refresh();
 })();
