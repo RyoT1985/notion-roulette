@@ -283,7 +283,6 @@
   let rotation = 0;
   let spinning = false;
   let roundMsg = "";
-  let pendingRefresh = null;
 
   function loadHistory() {
     try {
@@ -428,7 +427,6 @@
 
   /** 盤面と履歴表示をいまの状態に合わせる */
   function refresh() {
-    if (pendingRefresh) { clearTimeout(pendingRefresh); pendingRefresh = null; }
     disarmReset();
     rebuild();
     draw();
@@ -477,13 +475,18 @@
       resultEl.innerHTML = `<div class="label">次回の司会は</div>${winner}&nbsp;さん`;
       spinning = false;
       spinBtn.disabled = false;
-      renderSidebar();
 
-      // 当選位置を少し見せてから、当選者を外した盤面に差し替える
-      // 連携モードは結果を確定表示にしたいので差し替えない
+      // 盤面はここで作り直さない。当選者を外した盤面に差し替えると、
+      // 針が指している人と結果表示が食い違って見えるため。
+      // 次に「まわす」を押したときに作り直す（spin() の先頭の refresh()）
       if (!LINKED) {
-        pendingRefresh = setTimeout(() => { pendingRefresh = null; refresh(); }, 1400);
+        const skip = new Set(excluded());
+        const left = roster.filter(m => !skip.has(m)).length;
+        roundMsg = left > 0
+          ? `「${winner}」を履歴に追加しました。次は残り ${left} 名から抽選します。`
+          : `「${winner}」で全員が一巡しました。次に「まわす」を押すと履歴がリセットされます。`;
       }
+      renderSidebar();
     }
     requestAnimationFrame(frame);
   }
